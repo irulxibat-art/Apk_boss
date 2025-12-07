@@ -3,10 +3,6 @@ import pandas as pd
 import os
 import hashlib
 
-Hash password
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
 Cek login
 def check_login(username, password):
     users = pd.read_csv(USER_FILE)
