@@ -1,12 +1,3 @@
-# streamlit_inventory_app_full.py
-# Inventory & Sales Streamlit App
-# - Role: boss (admin) and karyawan (employee)
-# - Boss can manage products (incl. cost), users, edit stock
-# - Karyawan can only record sales and view history
-# - P&L harian ditampilkan di Histori Penjualan
-# NOTE: If you already have an existing inventory.db, remove it so the new schema is used.
-
-import streamlit as st
 import sqlite3
 import hashlib
 import pandas as pd
