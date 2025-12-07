@@ -313,7 +313,7 @@ else:
                 ok, msg = record_sale(int(prod_id), int(qty), int(user["id"]))
                 if ok:
                     st.success(msg)
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.error(msg)
 
