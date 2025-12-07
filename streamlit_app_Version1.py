@@ -3,15 +3,6 @@ import pandas as pd
 import os
 import hashlib
 
-Inisialisasi file jika belum ada
-def init_file(file, columns):
-    if not os.path.exists(file):
-        pd.DataFrame(columns=columns).to_csv(file, index=False)
-
-init_file(STOK_FILE, ['Nama Barang', 'Stok'])
-init_file(PENJUALAN_FILE, ['Nama Barang', 'Jumlah Terjual'])
-init_file(USER_FILE, ['username', 'password_hash', 'role'])
-
 Hash password
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
