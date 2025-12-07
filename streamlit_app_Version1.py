@@ -198,13 +198,10 @@ else:
             price = st.number_input("Harga Jual", min_value=0.0)
             stock = st.number_input("Stok", min_value=0, step=1)
 
-            if st.form_submit_button("Tambah User"):
-                ok, msg = create_user(username, password, role_user)
-                if ok:
-                    st.success(msg)
-                    st.rerun()
-                else:
-                    st.error(msg)
+            if st.form_submit_button("Tambah Produk"):
+                add_product(sku, name, cost, price, stock)
+                st.success("Produk berhasil ditambahkan")
+                st.rerun()
 
 
     # ========== PENJUALAN ==========
@@ -264,6 +261,10 @@ else:
             role_user = st.selectbox("Role", ["boss", "karyawan"])
 
             if st.form_submit_button("Tambah User"):
-                create_user(username, password, role_user)
-                st.success("User berhasil dibuat")
-                st.rerun()
+                ok, msg = create_user(username, password, role_user)
+                if ok:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
+
