@@ -3,11 +3,6 @@ import pandas as pd
 import os
 import hashlib
 
-File data
-STOK_FILE = 'stok.csv'
-PENJUALAN_FILE = 'penjualan.csv'
-USER_FILE = 'users.csv'
-
 Inisialisasi file jika belum ada
 def init_file(file, columns):
     if not os.path.exists(file):
