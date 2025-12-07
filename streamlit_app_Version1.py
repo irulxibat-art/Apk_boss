@@ -1,260 +1,371 @@
 import streamlit as st
 import sqlite3
-import pandas as pd
 import hashlib
+import pandas as pd
 import datetime
+import io
 
-st.set_page_config(page_title="Inventory & Sales App", layout="wide")
+DB_PATH = "inventory.db"
 
-DB_NAME = "inventory.db"
-
-# ========== DATABASE ==========
+# -------------------------
+# Utility: DB init & helpers
+# -------------------------
 def get_conn():
-    return sqlite3.connect(DB_NAME, check_same_thread=False)
+    return sqlite3.connect(DB_PATH, check_same_thread=False)
 
 def init_db():
     conn = get_conn()
     c = conn.cursor()
-
+    # users: id, username(unique), password_hash, role ('boss' or 'karyawan'), created_at
     c.execute("""CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        password TEXT,
-        role TEXT,
-        created_at TEXT
-    )""")
-
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )""")
+    # products: id, sku, name, price, stock, created_at
     c.execute("""CREATE TABLE IF NOT EXISTS products (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        sku TEXT UNIQUE,
-        name TEXT,
-        cost REAL,
-        price REAL,
-        stock INTEGER,
-        created_at TEXT
-    )""")
-
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sku TEXT UNIQUE,
+                    name TEXT NOT NULL,
+                    price REAL NOT NULL,
+                    stock INTEGER NOT NULL,
+                    created_at TEXT NOT NULL
+                )""")
+    # sales: id, product_id, qty, price_each, total, sold_by (user id), sold_at
     c.execute("""CREATE TABLE IF NOT EXISTS sales (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product_id INTEGER,
-        qty INTEGER,
-        cost_each REAL,
-        price_each REAL,
-        total REAL,
-        profit REAL,
-        sold_by INTEGER,
-        sold_at TEXT
-    )""")
-
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    product_id INTEGER NOT NULL,
+                    qty INTEGER NOT NULL,
+                    price_each REAL NOT NULL,
+                    total REAL NOT NULL,
+                    sold_by INTEGER NOT NULL,
+                    sold_at TEXT NOT NULL,
+                    FOREIGN KEY(product_id) REFERENCES products(id),
+                    FOREIGN KEY(sold_by) REFERENCES users(id)
+                )""")
     conn.commit()
-    return conn
 
-conn = init_db()
+    # create default boss account if not exists
+    if not get_user_by_username("boss"):
+        create_user("boss", "boss123", "boss")
+    conn.close()
 
-# ========== AUTH ==========
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
+def hash_password(password: str) -> str:
+    # simple sha256, include static salt (for demo). In prod use better hashing (bcrypt).
+    salt = "static_salt_demo_v1"
+    return hashlib.sha256((salt + password).encode()).hexdigest()
 
-def create_default_user():
+# -------------------------
+# User management
+# -------------------------
+def create_user(username: str, password: str, role: str="karyawan"):
+    conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE username = 'boss'")
-    if not c.fetchone():
-        now = datetime.datetime.utcnow().isoformat()
-        c.execute("INSERT INTO users (username, password, role, created_at) VALUES (?, ?, ?, ?)",
-                  ("boss", hash_password("boss123"), "boss", now))
+    ph = hash_password(password)
+    now = datetime.datetime.utcnow().isoformat()
+    try:
+        c.execute("INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
+                  (username, ph, role, now))
         conn.commit()
+        return True, "User dibuat."
+    except sqlite3.IntegrityError as e:
+        return False, "Username sudah ada."
+    finally:
+        conn.close()
 
-create_default_user()
-
-def login_user(username, password):
+def get_user_by_username(username: str):
+    conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE username = ? AND password = ?",
-              (username, hash_password(password)))
-    return c.fetchone()
+    c.execute("SELECT id, username, password_hash, role, created_at FROM users WHERE username = ?", (username,))
+    row = c.fetchone()
+    conn.close()
+    return row
 
-def create_user(username, password, role):
+def authenticate(username: str, password: str):
+    row = get_user_by_username(username)
+    if not row:
+        return False, "User tidak ditemukan."
+    stored_hash = row[2]
+    if stored_hash == hash_password(password):
+        user = {"id": row[0], "username": row[1], "role": row[3]}
+        return True, user
+    else:
+        return False, "Password salah."
+
+# -------------------------
+# Product & Sales
+# -------------------------
+def add_product(sku: str, name: str, price: float, stock: int):
+    conn = get_conn()
     c = conn.cursor()
     now = datetime.datetime.utcnow().isoformat()
-    c.execute("INSERT INTO users (username, password, role, created_at) VALUES (?, ?, ?, ?)",
-              (username, hash_password(password), role, now))
-    conn.commit()
+    try:
+        c.execute("INSERT INTO products (sku, name, price, stock, created_at) VALUES (?, ?, ?, ?, ?)",
+                  (sku if sku else None, name, price, stock, now))
+        conn.commit()
+        return True, "Produk berhasil ditambahkan."
+    except sqlite3.IntegrityError:
+        return False, "SKU sudah ada."
+    finally:
+        conn.close()
 
-# ========== PRODUCT ==========
-def add_product(sku, name, cost, price, stock):
+def update_product(product_id: int, name: str, price: float, stock: int, sku: str=None):
+    conn = get_conn()
     c = conn.cursor()
-    now = datetime.datetime.utcnow().isoformat()
-    c.execute("INSERT INTO products (sku, name, cost, price, stock, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-              (sku, name, cost, price, stock, now))
-    conn.commit()
+    try:
+        if sku:
+            c.execute("UPDATE products SET sku=?, name=?, price=?, stock=? WHERE id=?",
+                      (sku, name, price, stock, product_id))
+        else:
+            c.execute("UPDATE products SET name=?, price=?, stock=? WHERE id=?",
+                      (name, price, stock, product_id))
+        conn.commit()
+        return True, "Produk diperbarui."
+    except sqlite3.IntegrityError:
+        return False, "SKU duplikat."
+    finally:
+        conn.close()
 
-def update_product(pid, name, cost, price, stock):
+def list_products_df():
+    conn = get_conn()
+    df = pd.read_sql_query("SELECT id, sku, name, price, stock, created_at FROM products ORDER BY name", conn)
+    conn.close()
+    return df
+
+def record_sale(product_id: int, qty: int, sold_by: int):
+    conn = get_conn()
     c = conn.cursor()
-    c.execute("UPDATE products SET name=?, cost=?, price=?, stock=? WHERE id=?",
-              (name, cost, price, stock, pid))
-    conn.commit()
-
-def get_products():
-    return pd.read_sql_query("SELECT * FROM products ORDER BY name", conn)
-
-# ========== SALES ==========
-def record_sale(product_id, qty, sold_by):
-    c = conn.cursor()
-
-    c.execute("SELECT stock, cost, price FROM products WHERE id = ?", (product_id,))
+    # check stock
+    c.execute("SELECT stock, price FROM products WHERE id = ?", (product_id,))
     row = c.fetchone()
     if not row:
-        return False, "Produk tidak ditemukan"
-
-    stock, cost, price = row
-
-    if qty > stock:
-        return False, "Stok tidak mencukupi"
-
-    total = price * qty
-    profit = (price - cost) * qty
+        conn.close()
+        return False, "Produk tidak ditemukan."
+    stock, price = row
+    if qty <= 0:
+        conn.close()
+        return False, "Jumlah harus > 0."
+    if stock < qty:
+        conn.close()
+        return False, f"Stok tidak cukup. Sisa: {stock}"
+    new_stock = stock - qty
+    total = round(price * qty, 2)
     sold_at = datetime.datetime.utcnow().isoformat()
+    try:
+        c.execute("UPDATE products SET stock = ? WHERE id = ?", (new_stock, product_id))
+        c.execute("INSERT INTO sales (product_id, qty, price_each, total, sold_by, sold_at) VALUES (?, ?, ?, ?, ?, ?)",
+                  (product_id, qty, price, total, sold_by, sold_at))
+        conn.commit()
+        return True, f"Penjualan dicatat. Total: {total}"
+    except Exception as e:
+        conn.rollback()
+        return False, "Gagal mencatat penjualan."
+    finally:
+        conn.close()
 
-    c.execute("""INSERT INTO sales
-        (product_id, qty, cost_each, price_each, total, profit, sold_by, sold_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (product_id, qty, cost, price, total, profit, sold_by, sold_at))
+def get_sales_df():
+    conn = get_conn()
+    query = """
+    SELECT s.id, p.name as product_name, p.sku, s.qty, s.price_each, s.total, u.username as sold_by, s.sold_at
+    FROM sales s
+    JOIN products p ON s.product_id = p.id
+    JOIN users u ON s.sold_by = u.id
+    ORDER BY s.sold_at DESC
+    """
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    return df
 
-    c.execute("UPDATE products SET stock = stock - ? WHERE id = ?", (qty, product_id))
-    conn.commit()
-    return True, "Penjualan berhasil"
+# -------------------------
+# Streamlit App
+# -------------------------
+st.set_page_config(page_title="Inventory & Sales App", layout="wide")
+init_db()
 
-def get_sales():
-    return pd.read_sql_query("""
-        SELECT s.id, p.name, s.qty, s.price_each, s.total, s.profit, s.sold_at, u.username
-        FROM sales s
-        JOIN products p ON s.product_id = p.id
-        JOIN users u ON s.sold_by = u.id
-        ORDER BY s.sold_at DESC
-    """, conn)
-
-# ========== SESSION ==========
+# Session state for login
 if "user" not in st.session_state:
     st.session_state.user = None
 
+def logout():
+    st.session_state.user = None
+    st.success("Logged out.")
 
-# ========== UI ==========
-if st.session_state.user is None:
-    st.title("Login")
-
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        user = login_user(username, password)
-        if user:
-            st.session_state.user = {
-                "id": user[0],
-                "username": user[1],
-                "role": user[3]
-            }
+# Sidebar: Login / User actions
+with st.sidebar:
+    st.title("Inventory App")
+    if st.session_state.user is None:
+        st.subheader("Login")
+        username = st.text_input("Username", key="login_user")
+        password = st.text_input("Password", type="password", key="login_pass")
+        if st.button("Login"):
+            ok, resp = authenticate(username.strip(), password)
+            if ok:
+                st.session_state.user = resp
+                st.rerun()
+            else:
+                st.error(resp)
+        st.markdown("---")
+        st.subheader("Register (boss only can create after login)")
+        st.info("Jika baru pakai, gunakan akun boss: boss / boss123")
+    else:
+        st.markdown(f"**Logged in as:** {st.session_state.user['username']} ({st.session_state.user['role']})")
+        if st.button("Logout"):
+            logout()
             st.rerun()
-        else:
-            st.error("Login gagal")
 
+# Main UI
+user = st.session_state.user
+
+if user is None:
+    st.header("Selamat datang")
+    st.write("Silakan login untuk mengelola stok dan penjualan.")
+    st.write("Aplikasi ini adalah demo sederhana: default boss: `boss` / `boss123`.")
+    st.write("Setelah login sebagai boss, kamu dapat membuat akun karyawan.")
 else:
-    user = st.session_state.user
     role = user["role"]
-
-    st.sidebar.write(f"Login sebagai: {user['username']} ({role})")
-
-    if st.sidebar.button("Logout"):
-        st.session_state.user = None
-        st.rerun()
-
+    st.header("Dashboard")
+    menu = None
     if role == "boss":
         menu = st.sidebar.selectbox("Menu", ["Home", "Produk & Stok", "Penjualan", "Histori Penjualan", "Manajemen User"])
     else:
-        menu = st.sidebar.selectbox("Menu", ["Home", "Penjualan", "Histori Penjualan"])
+        menu = st.sidebar.selectbox("Menu", ["Home", "Produk & Stok", "Penjualan", "Histori Penjualan"])
 
-    # ========== HOME ==========
     if menu == "Home":
-        st.title("Dashboard")
+        st.subheader("Ringkasan")
+        prod_df = list_products_df()
+        total_products = len(prod_df)
+        total_stock = int(prod_df["stock"].sum()) if total_products>0 else 0
+        total_value = float((prod_df["price"] * prod_df["stock"]).sum()) if total_products>0 else 0.0
+        sales_df = get_sales_df()
+        total_sales = sales_df["total"].sum() if not sales_df.empty else 0.0
 
-    # ========== PRODUK ==========
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Jumlah Produk", total_products)
+        col2.metric("Total Unit Stok", total_stock)
+        col3.metric("Nilai Stok (estimasi)", f"Rp {total_value:,.2f}")
+        col4.metric("Total Penjualan (semua waktu)", f"Rp {total_sales:,.2f}")
+        st.markdown("### Produk terbaru")
+        st.dataframe(prod_df.sort_values("created_at", ascending=False).reset_index(drop=True))
+
     elif menu == "Produk & Stok":
-        if role != "boss":
-            st.error("Tidak ada akses")
-            st.stop()
+        st.subheader("Kelola Produk")
+        prod_df = list_products_df()
+        st.markdown("#### Daftar Produk")
+        st.dataframe(prod_df)
 
-        st.subheader("Tambah Produk")
+        st.markdown("---")
+        st.markdown("#### Tambah Produk Baru")
+        with st.form("add_product_form", clear_on_submit=True):
+            sku = st.text_input("SKU (boleh kosong)")
+            name = st.text_input("Nama Produk", value="")
+            price = st.number_input("Harga per unit (Rp)", min_value=0.0, value=0.0, step=1000.0, format="%.2f")
+            stock = st.number_input("Stok awal (unit)", min_value=0, value=0, step=1)
+            submitted = st.form_submit_button("Tambah Produk")
+            if submitted:
+                if not name:
+                    st.error("Nama produk wajib diisi.")
+                else:
+                    ok, msg = add_product(sku.strip(), name.strip(), float(price), int(stock))
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
 
-        with st.form("add_prod"):
-            sku = st.text_input("SKU")
-            name = st.text_input("Nama Produk")
-            cost = st.number_input("Harga Modal", min_value=0.0)
-            price = st.number_input("Harga Jual", min_value=0.0)
-            stock = st.number_input("Stok", min_value=0, step=1)
-
-            if st.form_submit_button("Tambah"):
-                add_product(sku, name, cost, price, stock)
-                st.rerun()
-
-        st.subheader("Daftar Produk")
-        df = get_products()
-        st.dataframe(df)
-
-    # ========== PENJUALAN ==========
-    elif menu == "Penjualan":
-        st.subheader("Input Penjualan")
-
-        df = get_products()
-        if df.empty:
-            st.info("Belum ada produk")
+        st.markdown("---")
+        st.markdown("#### Edit Produk")
+        prod_list = prod_df[["id", "name"]].set_index("id")["name"].to_dict()
+        if prod_list:
+            selected_id = st.selectbox("Pilih produk untuk edit", options=list(prod_list.keys()),
+                                       format_func=lambda x: f"{x} - {prod_list[x]}")
+            if selected_id:
+                row = prod_df[prod_df["id"] == selected_id].iloc[0]
+                with st.form("edit_product_form"):
+                    new_sku = st.text_input("SKU", value=row["sku"] if row["sku"] else "")
+                    new_name = st.text_input("Nama", value=row["name"])
+                    new_price = st.number_input("Harga per unit (Rp)", min_value=0.0, value=float(row["price"]), format="%.2f")
+                    new_stock = st.number_input("Stok (unit)", min_value=0, value=int(row["stock"]), step=1)
+                    updated = st.form_submit_button("Simpan Perubahan")
+                    if updated:
+                        ok, msg = update_product(int(selected_id), new_name.strip(), float(new_price), int(new_stock), new_sku.strip() if new_sku else None)
+                        if ok:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
         else:
-            product_map = {f"{r['name']} (Stok: {r['stock']})": r['id'] for _, r in df.iterrows()}
-            selected = st.selectbox("Pilih Produk", list(product_map.keys()))
-            qty = st.number_input("Qty", min_value=1, step=1)
+            st.info("Belum ada produk. Tambahkan produk baru di atas.")
 
-            if st.button("Simpan Penjualan"):
-                pid = product_map[selected]
-                ok, msg = record_sale(pid, qty, user["id"])
+    elif menu == "Penjualan":
+        st.subheader("Catat Penjualan")
+        prod_df = list_products_df()
+        if prod_df.empty:
+            st.info("Belum ada produk. Tambahkan produk dulu.")
+        else:
+            prod_map = prod_df.set_index("id").to_dict(orient="index")
+            options = [(row["id"], f"{row['name']} (stok: {row['stock']}, Rp {row['price']:.2f})") for _, row in prod_df.iterrows()]
+            prod_choice = st.selectbox("Pilih produk", options=options, format_func=lambda x: x[1])
+            prod_id = prod_choice[0] if isinstance(prod_choice, tuple) else prod_choice
+            qty = st.number_input("Jumlah terjual", min_value=1, value=1, step=1)
+            if st.button("Catat Penjualan"):
+                ok, msg = record_sale(int(prod_id), int(qty), int(user["id"]))
                 if ok:
                     st.success(msg)
                     st.rerun()
                 else:
                     st.error(msg)
 
-    # ========== HISTORI ==========
     elif menu == "Histori Penjualan":
-        st.subheader("Histori & P&L Harian")
-
-        sales_df = get_sales()
-
+        st.subheader("Histori Penjualan")
+        sales_df = get_sales_df()
         if sales_df.empty:
-            st.info("Belum ada transaksi")
+            st.info("Belum ada penjualan.")
         else:
             sales_df["sold_at"] = pd.to_datetime(sales_df["sold_at"])
-            sales_df["tanggal"] = sales_df["sold_at"].dt.date
-
             st.dataframe(sales_df)
+            # filter & export
+            st.markdown("---")
+            st.markdown("### Export")
+            buf = io.StringIO()
+            sales_df.to_csv(buf, index=False)
+            csv_bytes = buf.getvalue().encode()
+            st.download_button("Download CSV histori penjualan", data=csv_bytes, file_name="sales_history.csv", mime="text/csv")
+            # basic summary
+            total_rev = sales_df["total"].sum()
+            total_items = sales_df["qty"].sum()
+            st.markdown(f"**Total pendapatan:** Rp {total_rev:,.2f}")
+            st.markdown(f"**Total item terjual:** {total_items}")
 
-            daily = sales_df.groupby("tanggal").agg(
-                total_penjualan=("total", "sum"),
-                total_profit=("profit", "sum")
-            ).reset_index()
-
-            st.markdown("### P&L Harian")
-            st.dataframe(daily)
-
-    # ========== USER ==========
     elif menu == "Manajemen User":
+        st.subheader("Manajemen User (boss only)")
         if role != "boss":
-            st.error("Tidak ada akses")
-            st.stop()
+            st.error("Hanya boss yang dapat mengakses halaman ini.")
+        else:
+            st.markdown("#### Buat akun karyawan")
+            with st.form("create_user_form"):
+                new_username = st.text_input("Username baru")
+                new_password = st.text_input("Password", type="password")
+                role_select = st.selectbox("Role", options=["karyawan"], index=0)
+                create_sub = st.form_submit_button("Buat Akun")
+                if create_sub:
+                    if not new_username or not new_password:
+                        st.error("Username dan password wajib diisi.")
+                    else:
+                        ok, msg = create_user(new_username.strip(), new_password, role_select)
+                        if ok:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+            st.markdown("---")
+            st.markdown("#### Daftar user")
+            conn = get_conn()
+            users_df = pd.read_sql_query("SELECT id, username, role, created_at FROM users ORDER BY created_at DESC", conn)
+            conn.close()
+            st.dataframe(users_df)
 
-        st.subheader("Tambah User")
-
-        with st.form("add_user"):
-            username = st.text_input("Username baru")
-            password = st.text_input("Password", type="password")
-            role_user = st.selectbox("Role", ["boss", "karyawan"])
-
-            if st.form_submit_button("Tambah User"):
-                create_user(username, password, role_user)
-                st.success("User berhasil dibuat")
-                st.rerun()
+# Footer / small note
+st.sidebar.markdown("---")
+st.sidebar.markdown("Aplikasi demo — jangan gunakan password default di lingkungan produksi.")
