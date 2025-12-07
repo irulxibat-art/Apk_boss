@@ -230,7 +230,7 @@ else:
     if role == "boss":
         menu = st.sidebar.selectbox("Menu", ["Home", "Produk & Stok", "Penjualan", "Histori Penjualan", "Manajemen User"])
     else:
-        menu = st.sidebar.selectbox("Menu", ["Home", "Produk & Stok", "Penjualan", "Histori Penjualan"])
+        menu = st.sidebar.selectbox("Menu", ["Home", "Penjualan", "Histori Penjualan"])
 
     if menu == "Home":
         st.subheader("Ringkasan")
@@ -250,6 +250,11 @@ else:
         st.dataframe(prod_df.sort_values("created_at", ascending=False).reset_index(drop=True))
 
     elif menu == "Produk & Stok":
+        if role != "boss":
+            st.error("Akses ditolak. Hanya boss yang boleh mengubah stock.")
+            st.stop()
+
+        
         st.subheader("Kelola Produk")
         prod_df = list_products_df()
         st.markdown("#### Daftar Produk")
