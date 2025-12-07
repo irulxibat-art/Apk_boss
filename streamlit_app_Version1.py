@@ -199,17 +199,13 @@ else:
             stock = st.number_input("Stok", min_value=0, step=1)
 
             if st.form_submit_button("Tambah User"):
-    ok, msg = create_user(username, password, role_user)
-    if ok:
-        st.success(msg)
-        st.rerun()
-    else:
-        st.error(msg)
+                ok, msg = create_user(username, password, role_user)
+                if ok:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
 
-
-        st.subheader("Daftar Produk")
-        df = get_products()
-        st.dataframe(df)
 
     # ========== PENJUALAN ==========
     elif menu == "Penjualan":
