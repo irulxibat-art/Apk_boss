@@ -270,7 +270,7 @@ else:
                     ok, msg = add_product(sku.strip(), name.strip(), float(price), int(stock))
                     if ok:
                         st.success(msg)
-                        st.experimental_rerun()
+                        st.rerun()
                     else:
                         st.error(msg)
 
