@@ -73,11 +73,19 @@ def login_user(username, password):
     return c.fetchone()
 
 def create_user(username, password, role):
-    c = conn.cursor()
-    now = datetime.datetime.utcnow().isoformat()
-    c.execute("INSERT INTO users (username, password, role, created_at) VALUES (?, ?, ?, ?)",
-              (username, hash_password(password), role, now))
-    conn.commit()
+    if not username or not password:
+        return False, "Username dan password wajib diisi"
+
+    try:
+        c = conn.cursor()
+        now = datetime.datetime.utcnow().isoformat()
+        c.execute("INSERT INTO users (username, password, role, created_at) VALUES (?, ?, ?, ?)",
+                  (username, hash_password(password), role, now))
+        conn.commit()
+        return True, "User berhasil dibuat"
+    except sqlite3.IntegrityError:
+        return False, "Username sudah digunakan"
+
 
 # ========== PRODUCT ==========
 def add_product(sku, name, cost, price, stock):
@@ -190,9 +198,14 @@ else:
             price = st.number_input("Harga Jual", min_value=0.0)
             stock = st.number_input("Stok", min_value=0, step=1)
 
-            if st.form_submit_button("Tambah"):
-                add_product(sku, name, cost, price, stock)
-                st.rerun()
+            if st.form_submit_button("Tambah User"):
+    ok, msg = create_user(username, password, role_user)
+    if ok:
+        st.success(msg)
+        st.rerun()
+    else:
+        st.error(msg)
+
 
         st.subheader("Daftar Produk")
         df = get_products()
