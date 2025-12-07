@@ -203,7 +203,7 @@ with st.sidebar:
             ok, resp = authenticate(username.strip(), password)
             if ok:
                 st.session_state.user = resp
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error(resp)
         st.markdown("---")
