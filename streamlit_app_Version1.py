@@ -1,4 +1,3 @@
-
 import streamlit as st
 import sqlite3
 import hashlib
@@ -214,7 +213,7 @@ with st.sidebar:
         st.markdown(f"**Logged in as:** {st.session_state.user['username']} ({st.session_state.user['role']})")
         if st.button("Logout"):
             logout()
-            st.experimental_rerun()
+            st.rerun()
 
 # Main UI
 user = st.session_state.user
@@ -293,7 +292,7 @@ else:
                         ok, msg = update_product(int(selected_id), new_name.strip(), float(new_price), int(new_stock), new_sku.strip() if new_sku else None)
                         if ok:
                             st.success(msg)
-                            st.experimental_rerun()
+                            st.rerun()
                         else:
                             st.error(msg)
         else:
